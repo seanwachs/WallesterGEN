@@ -1,1 +1,4 @@
 api_key: insert API key here
+private_key_path: insert path to private key here
+public_key_path: insert path to public key here
+account_id: insert account id
