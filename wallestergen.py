@@ -144,46 +144,91 @@ def create_card(name):
         }
 
         data = requests.post(url, headers=headers, json=payload).json()
-        card_id = data['card']['id']
-        add_card_to_csv(data['card'])
-        card_number = get_card_number(card_id)
-        card_cvv = get_card_cvv(card_id)
-
-        replace_card_csv_value(card_id, 3, card_number)
-        replace_card_csv_value(card_id, 5, card_cvv)
+        add_or_update_local_csv(data['card'])
         
     except Exception as e:
         print(e)
 
-## Account id key required here
-def update_3DS_settings(card_id):
+def get_merchant_rule(card_id):
     try:
-        url = "https://api-frontend.wallester.com/v1/cards/"+card_id + "/merchant-rules"
+        url = "https://api-frontend.wallester.com/v1/cards/"+card_id+"/merchant-rules"
 
         headers = {
-            "X-Product-Code": "TODO",
-            "X-Audit-Source": "TODO",
-            "X-Audit-User-Id": "TODO",
+            # "X-Product-Code": "TODO",
+            # "X-Audit-Source": "TODO",
+            # "X-Audit-User-Id": "TODO",
+            "Authorization": generateJWT()
+        }
+
+        response = requests.get(url, headers=headers).json()
+        print(response)
+        
+    except Exception as e:
+        print(e)
+
+def add_merchant_rule(card_id):
+    try:
+        url = "https://api-frontend.wallester.com/v1/cards/"+card_id+"/merchant-rules"
+
+        headers = {
+            # "X-Product-Code": "TODO",
+            # "X-Audit-Source": "TODO",
+            # "X-Audit-User-Id": "TODO",
             "Authorization": generateJWT()
         }
 
         payload = {
-            "type":"MerchantCountryCode",
-            "value": "TODO",
+            "type":"MerchantCategoryCode",
+            "value": "5661",
             "is_whitelist":True
         }
 
         data = requests.post(url, headers=headers, json=payload).json()
-        card_id = data['card']['id']
-        add_card_to_csv(data['card'])
-        card_number = get_card_number(card_id)
-        card_cvv = get_card_cvv(card_id)
-
-        replace_card_csv_value(card_id, 3, card_number)
-        replace_card_csv_value(card_id, 5, card_cvv)
+        print(data)
         
     except Exception as e:
         print(e)
+
+def update_card_name(card_id, new_name):
+    try:
+        url = "https://api-frontend.wallester.com/v1/cards/"+card_id+"/name"
+
+        headers = {
+            "Authorization": generateJWT()
+        }
+
+        payload = {
+            "name":new_name
+        }
+
+        response = requests.patch(url, headers=headers, json=payload).json()
+        return response
+        
+    except Exception as e:
+        print(e)
+
+def update_3DS_settings(card_id, phone):
+    try:
+        url = "https://api-frontend.wallester.com/v1/cards/"+card_id+"/3d-secure/settings"
+
+        headers = {
+            "Authorization": generateJWT()
+        }
+
+        payload = {
+            "type":"SMSOTPAndStaticPassword",
+            "language_code":"ENG",
+            "mobile":phone,
+            "password":"12345678"
+        }
+
+        response = requests.patch(url, headers=headers, json=payload).json()
+        return response
+        
+    except Exception as e:
+        print(e)
+
+
 
 def write_line_to_file(filename, columns):
     with open(os.path.join(current_dir, filename+".csv"), 'a+', newline='\n', encoding='utf-8') as new_file:
@@ -202,12 +247,45 @@ def get_all_csv_lines(filename):
         return list_of_csv
 
 
+def add_or_update_local_csv(card):
+    #DO WE HAVE A MATCH IN LOCAL FILE?
+    local_card_ids = get_all_card_ids_from_csv()
+    if card['id'] in local_card_ids: #UPDATE
+        
+        #find local card details
+        local_cards = get_all_csv_lines('cards')
+        card_match = next(c for c in local_cards if c[0] == card['id'])
+        
+        if "*" in card_match[3]: #update card_number
+            card_number = get_card_number(card['id'])
+            replace_card_csv_value(card['id'], 3, card_number)
+        
+        if "*" in card_match[5]: #update cvv
+            card_cvv = get_card_cvv(card['id'])
+            replace_card_csv_value(card['id'], 5, card_cvv)
+
+        #UPDATE NAME
+        if 'name' in card:
+            replace_card_csv_value(card['id'], 1, card['name'])
+
+        #UPDATE PHONE NUMBER
+        replace_card_csv_value(card['id'], 2, card['3d_secure_settings']['mobile'])
+        
+    else: #ADD
+        card['masked_card_number'] = get_card_number(card['id'])
+        card_cvv = get_card_cvv(card['id'])
+        add_card_to_csv(card, card_cvv)
+
+    
+    
+
 
 def replace_card_csv_value(card_id, column_index, new_value):
     all_rows = get_all_csv_lines('cards')
     for row in all_rows:
         if row[0] == card_id:
             row[column_index] = new_value
+            break
     
     write_lines_to_file_replaces('cards', all_rows)
 
@@ -215,21 +293,21 @@ def get_all_card_ids_from_csv():
     all_rows = get_all_csv_lines('cards')
     return [card[0] for card in all_rows]
 
-def add_card_to_csv(card):
+def add_card_to_csv(card, _cvv="***"):
     card_id = card['id']
     name = card['name'] if 'name' in card else 'none'  
     exp = card['expiry_date'].replace('-31T23:59:59Z','').replace('-30T23:59:59Z','')
     mobile = card['3d_secure_settings']['mobile']
     card_number = card['masked_card_number']
-    cvv = "***"
+    cvv = _cvv
     write_line_to_file("cards", [card_id, name, mobile, card_number, exp, cvv])
 
 
 ### add all active cards to file with their IDS ###
-def add_all_active_cards_to_csv():
-    cards = get_all_active_cards()
-    for card in cards['cards']:
-        add_card_to_csv(card)
+# def add_all_active_cards_to_csv():
+#     cards = get_all_active_cards()
+#     for card in cards['cards']:
+#         add_card_to_csv(card)
 
 
 # card_ids_from_csv = get_all_card_ids_from_csv()
@@ -240,19 +318,20 @@ def add_all_active_cards_to_csv():
 #     replace_card_csv_value(card_id, 3, card_number)
 #     replace_card_csv_value(card_id, 5, card_cvv)
 
-
 ### GENERATE CARDS ###
-for n in range(1,1000):
-    card_name = "auto_"+str(n)
+for n in range(900,3000):
+    card_name = "JW"+str(n)
     print("creating card " + card_name)
     create_card(card_name)
 
+#response = update_card_name("00c8ea05-ee57-4ce2-b652-c113096ac9eb", "lort")
 
-
-time.sleep(500)
-
-
-
+# all_local_cards = get_all_card_ids_from_csv()
+# for index, card in enumerate(all_local_cards):
+#     print("idx: " + str(index))
+#     response = update_3DS_settings(card, "+4591489911")
+#     #response = update_card_name(card, "JW"+str(index)) #update_3DS_settings(card, "+4591489911")
+#     add_or_update_local_csv(response['card'])
 
 # i = 0
 # while i < 267:
