@@ -7,6 +7,10 @@ from age.keys.rsa import RSAPrivateKey, RSAPublicKey
 from age.primitives.rsa_oaep import rsa_decrypt, rsa_encrypt
 import yaml
 import base64
+import concurrent.futures
+import time
+import threading
+
 current_dir = os.path.dirname(__file__)
 config_path = os.path.join(current_dir, "config.yml")
 config = yaml.safe_load(open(config_path))
@@ -108,10 +112,10 @@ def get_card_cvv(card_id):
     decrypted = str(rsa_decrypt(private_key, label, base64_message)).replace("b'", "").replace("'", "")
     return decrypted
 
-def get_all_active_cards():
+def get_all_active_cards(from_records="0"):
     getEncrypted = False
     while getEncrypted == False:
-        url = "https://api-frontend.wallester.com/v1/product-cards?from_record=0&records_count=1000&is_active=true"
+        url = "https://api-frontend.wallester.com/v1/product-cards?from_record="+from_records+"&records_count=1000&is_active=true"
         headers = {
                 "Authorization": generateJWT()
             }
@@ -206,8 +210,25 @@ def update_card_name(card_id, new_name):
         
     except Exception as e:
         print(e)
+        
+def close_card(card_id):
+    try:
+        url = "https://api-frontend.wallester.com/v1/cards/"+card_id+"/close"
+        
+        payload = {"close_reason": "ClosedByClient"}
+
+        headers = {
+            "Authorization": generateJWT()
+        }
+
+        response = requests.patch(url, headers=headers, json=payload).json()
+        return response
+        
+    except Exception as e:
+        print(e)
 
 def update_3DS_settings(card_id, phone):
+    global completed_threads
     try:
         url = "https://api-frontend.wallester.com/v1/cards/"+card_id+"/3d-secure/settings"
 
@@ -223,6 +244,10 @@ def update_3DS_settings(card_id, phone):
         }
 
         response = requests.patch(url, headers=headers, json=payload).json()
+        with lock:
+            completed_threads += 1
+            print(f"Threads done: {completed_threads}")
+        
         return response
         
     except Exception as e:
@@ -302,6 +327,41 @@ def add_card_to_csv(card, _cvv="***"):
     cvv = _cvv
     write_line_to_file("cards", [card_id, name, mobile, card_number, exp, cvv])
 
+# Define a counter to keep track of the number of completed threads
+completed_threads = 0
+lock = threading.Lock()
+
+def change_3ds_settings_multithreaded():
+    tasks = []  # List of functions to execute
+    input_values = []  # List of input values for the tasks
+
+    all_local_cards = get_all_card_ids_from_csv()
+    for index, card in enumerate(all_local_cards):
+        if index < 1000:
+            phone = "+4591489911"
+        elif index < 2000:
+            phone = "+4571672124"
+        elif index < 3000:
+            phone = "+4571627499"
+        else:
+            phone = "+4571628152"
+        
+        tasks.append(update_3DS_settings)
+        input_values.append((card, phone))
+    
+    #TODO REMOVE
+    # tasks = tasks[-10:]
+    # input_values = input_values[-10:]
+
+    # Use a ThreadPoolExecutor to run the tasks concurrently
+    #with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        # Submit tasks to the executor and store the Future objects in a list
+        #futures = [executor.submit(task, *input_value) for task, input_value in zip(tasks, input_values)]
+
+        # Gather the results from the Future objects and store them in a list
+        #results = [future.result() for future in concurrent.futures.as_completed(futures)]
+
+    #return results
 
 ### add all active cards to file with their IDS ###
 # def add_all_active_cards_to_csv():
@@ -318,20 +378,68 @@ def add_card_to_csv(card, _cvv="***"):
 #     replace_card_csv_value(card_id, 3, card_number)
 #     replace_card_csv_value(card_id, 5, card_cvv)
 
+#generate a list of strings that contains "JW" + number from to 300 (JW1, JW2, JW3, ..., JW300)
+# Generate a list of strings "JW" + number from 1 to 300
+
+cards = get_all_csv_lines('cards')
+jw_list = ["JW" + str(i) for i in range(1, 301)]
+
+for card in cards:
+    id = card[0]
+    name = card[1]
+    if name not in jw_list:
+        response = close_card(id)
+        print(response)
+    
+
 ### GENERATE CARDS ###
-for n in range(900,3000):
-    card_name = "JW"+str(n)
-    print("creating card " + card_name)
-    create_card(card_name)
+# for n in range(2,3000):
+#     card_name = "JW"+str(n)
+#     print("creating card " + card_name)
+#     create_card(card_name)
+
+
+# cards = []
+# cards.extend(get_all_active_cards("0")['cards'])
+# cards.extend(get_all_active_cards("1000")['cards'])
+# cards.extend(get_all_active_cards("2000")['cards'])
+# cards.extend(get_all_active_cards("3000")['cards'])
+# cards.extend(get_all_active_cards("4000")['cards'])
+
+# all_ids = get_all_card_ids_from_csv()
+# for c in cards:
+#     if c['id'] not in all_ids:
+#         print(":)")
+#         add_or_update_local_csv(c)
+# print(":)")
 
 #response = update_card_name("00c8ea05-ee57-4ce2-b652-c113096ac9eb", "lort")
 
+# if __name__ == "__main__":
+#     cards = change_3ds_settings_multithreaded()
+#     counter = 0
+#     for c in cards:
+#         counter = counter+1
+#         print("updated: " + str(counter))
+#         add_or_update_local_csv(c['card'])
+#     print("hey")
+
 # all_local_cards = get_all_card_ids_from_csv()
 # for index, card in enumerate(all_local_cards):
+#     if index < 1000:
+#         phone = "+18333995775"
+#     elif index < 2000:
+#         phone = "+18333334290"
+#     elif index < 3000:
+#         phone = "+18444451160"
+#     else:
+#         phone = "+18444413640"
 #     print("idx: " + str(index))
-#     response = update_3DS_settings(card, "+4591489911")
-#     #response = update_card_name(card, "JW"+str(index)) #update_3DS_settings(card, "+4591489911")
+#     response = update_3DS_settings(card, phone)
 #     add_or_update_local_csv(response['card'])
+      
+
+#add_or_update_local_csv(update_3DS_settings("fbe84600-b885-4f83-9f20-009cb3dd9446", "+18333995775")['card'])
 
 # i = 0
 # while i < 267:
