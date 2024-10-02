@@ -2,3 +2,7 @@ config.yml
 .DS_Store
 cards_ids.csv
 cards.csv
+clean-cards.csv
+cards_ids.txt
+cards.txt
+clean-cards.txt
